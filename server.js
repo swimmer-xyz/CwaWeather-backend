@@ -2,6 +2,19 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+
+// 是否啟用 Proxy
+const ENABLE_PROXY = process.env.ENABLE_PROXY === "true"; // ✅ 檢查環境變數
+let proxyAgent = null;
+
+if (ENABLE_PROXY) {
+  const proxyUrl = `http://${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
+  proxyAgent = new HttpsProxyAgent(proxyUrl);
+  console.log(`✅ 已啟用 Proxy: ${proxyUrl}`);
+} else {
+  console.log("⚠️ 未啟用 Proxy，直接連線 API");
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,14 +45,22 @@ const getKaohsiungWeather = async (req, res) => {
 
     // 呼叫 CWA API - 一般天氣預報（36小時）
     // API 文件: https://opendata.cwa.gov.tw/dist/opendata-swagger.html
+
+    const axiosConfig = {
+      params: {
+        Authorization: CWA_API_KEY,
+        locationName: "高雄市",
+      },
+    };
+    // 如果啟用 Proxy，加入 httpsAgent 與 proxy: false
+    if (ENABLE_PROXY && proxyAgent) {
+      axiosConfig.httpsAgent = proxyAgent;
+      axiosConfig.proxy = false;
+    }
+
     const response = await axios.get(
       `${CWA_API_BASE_URL}/v1/rest/datastore/F-C0032-001`,
-      {
-        params: {
-          Authorization: CWA_API_KEY,
-          locationName: "宜蘭縣",
-        },
-      }
+      axiosConfig
     );
 
     // 取得高雄市的天氣資料
