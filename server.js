@@ -156,6 +156,96 @@ const getWeather36hrByCity = async (req, res) => {
   }
 };
 
+/**
+ * 動態取得指定縣市的天氣警特報
+ * CWA 氣象資料開放平臺 API
+ * 使用「天氣警特報」資料集
+ */
+const getWeatherHazardsByCity = async (req, res) => {
+  try {
+    // 檢查是否有設定 API Key
+    if (!CWA_API_KEY) {
+      return res.status(500).json({
+        error: "伺服器設定錯誤",
+        message: "請在 .env 檔案中設定 CWA_API_KEY",
+      });
+    }
+
+    // 從路由參數取得縣市名稱
+    const cityName = req.params.city;
+    if (!cityName) {
+      return res.status(400).json({
+        error: "請提供縣市名稱",
+        message:
+          "路徑格式：/api/weather_hazards/:city，例如 /api/weather_hazards/高雄市",
+      });
+    }
+
+    // 呼叫 CWA API - 天氣警特報
+    // API 文件: https://opendata.cwa.gov.tw/dist/opendata-swagger.html
+    const axiosConfig = {
+      params: {
+        Authorization: CWA_API_KEY,
+        locationName: cityName,
+      },
+    };
+    // 如果啟用 Proxy，加入 httpsAgent 與 proxy: false
+    if (ENABLE_PROXY && proxyAgent) {
+      axiosConfig.httpsAgent = proxyAgent;
+      axiosConfig.proxy = false;
+    }
+
+    const response = await axios.get(
+      `${CWA_API_BASE_URL}/v1/rest/datastore/W-C0033-001`,
+      axiosConfig
+    );
+
+    // 取得縣市的天氣警特報
+    const locationData = response.data.records.location[0];
+    if (!locationData) {
+      return res.status(404).json({
+        error: "查無資料",
+        message: `無法取得${cityName}天氣資料`,
+      });
+    }
+
+    // 取出 hazards 並轉換格式
+    const hazardsArray = locationData.hazardConditions.hazards.map((h) => ({
+      phenomena: h.info.phenomena,
+      startTime: h.validTime.startTime,
+      endTime: h.validTime.endTime,
+    }));
+
+    // 整理hazards資料
+    const hazardsData = {
+      city: locationData.locationName,
+      hazards: hazardsArray,
+    };
+
+    res.json({
+      success: true,
+      data: hazardsData,
+    });
+  } catch (error) {
+    console.error("取得警特報資料失敗:", error.message);
+
+    if (error.response) {
+      // API 回應錯誤
+      return res.status(error.response.status).json({
+        error: "CWA API 錯誤",
+        message: error.response.data.message || "無法取得警特報資料",
+        details: error.response.data,
+      });
+    }
+
+    // 其他錯誤
+    res.status(500).json({
+      error: "伺服器錯誤",
+      message: "無法取得警特報資料，請稍後再試",
+    });
+  }
+};
+
 // Routes
 app.get("/", (req, res) => {
   res.json({
@@ -166,6 +256,11 @@ app.get("/", (req, res) => {
         description: "取得指定縣市的今明 36 小時天氣預報",
         example: "/api/weather_36hr/臺北市",
       },
+      weather_hazards: {
+        url: "/api/weather_hazards/:city",
+        description: "取得指定縣市的天氣警特報",
+        example: "/api/weather_hazards/高雄市",
+      },
       health: "/api/health",
     },
   });
@@ -175,8 +270,11 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-// 取得高雄天氣預報
+// 取得天氣預報
 app.get("/api/weather_36hr/:city", getWeather36hrByCity);
+
+// 取得天氣警特報
+app.get("/api/weather_hazards/:city", getWeatherHazardsByCity);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
